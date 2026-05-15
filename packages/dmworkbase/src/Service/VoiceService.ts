@@ -16,6 +16,7 @@ export interface VoiceConfig {
 export interface TranscribeResult {
   text: string;
   m: string; // shortened model name from backend
+  request_id?: string; // backend request ID for end-to-end correlation
 }
 
 export interface VoiceContextResponse {

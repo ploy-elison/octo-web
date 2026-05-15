@@ -71,6 +71,7 @@ import Download from "yet-another-react-lightbox/plugins/download";
 import { buildChatContext, ChatContextChannelInfo } from "./chatContext";
 import { parseThreadChannelId } from "../../Service/Thread";
 import FoldSessionExpandedList from "./FoldSessionExpandedList";
+import { emitHook } from "../../Service/OctoHooks";
 
 /**
  * 取消息的有效内容：如果消息被编辑过，返回编辑后的 contentEdit；否则返回原始 content
@@ -2269,6 +2270,13 @@ export class Conversation
                         topFiles?: { id: string; file: File }[],
                         editorBlocks?: EditorContentBlock[],
                       ) => {
+                        const _hookChannelId = this.props.channel.channelID;
+                        if (_hookChannelId && text?.trim()) {
+                          emitHook("message:send:before", {
+                            channel_id: _hookChannelId,
+                            text,
+                          });
+                        }
                         // ── 回复/编辑处理 ──────────────
                         let reply: Reply | undefined;
                         if (vm.currentReplyMessage) {

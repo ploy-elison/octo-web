@@ -8,6 +8,7 @@ import VoiceService, {
 import LocalModelService, { LocalModelConfig } from "../../Service/LocalModelService";
 import WKApp from "../../App";
 import { ChatContextResult } from "../Conversation/chatContext";
+import { emitHook } from "../../Service/OctoHooks";
 
 export interface UseVoiceInputOptions {
   maxDuration?: number;
@@ -37,6 +38,25 @@ function getSupportedMimeType(): string {
     return "audio/webm;codecs=opus";
   }
   return "audio/mp4";
+}
+
+function emitTranscribeResult(
+  text: string,
+  source: "local" | "remote",
+  utteranceId: string,
+  audioBlob?: Blob,
+  requestId?: string,
+): void {
+  const chId = WKApp.shared.openChannel?.channelID;
+  if (!chId) return;
+  emitHook("voice:transcribe:result", {
+    channel_id: chId,
+    utterance_id: utteranceId,
+    text,
+    source,
+    audio: audioBlob,
+    request_id: requestId,
+  });
 }
 
 export default function useVoiceInput(
@@ -251,6 +271,7 @@ export default function useVoiceInput(
       recorder.onstop = async () => {
         const mimeType = getSupportedMimeType();
         const blob = new Blob(chunksRef.current, { type: mimeType });
+        const utteranceId = crypto.randomUUID?.() ?? (Math.random().toString(36).slice(2) + Date.now().toString(36));
         cleanup();
         setIsRecording(false);
 
@@ -311,6 +332,7 @@ export default function useVoiceInput(
               );
             if (localResult) {
               if (localResult.text && onTranscribed) {
+                emitTranscribeResult(localResult.text, "local", utteranceId, blob);
                 onTranscribed(localResult.text);
               }
               return;
@@ -333,6 +355,7 @@ export default function useVoiceInput(
               chatCtxResult.channelType,
             );
             if (result.text && onTranscribed) {
+              emitTranscribeResult(result.text, "remote", utteranceId, blob, result.request_id);
               onTranscribed(result.text);
             }
             return;
@@ -372,6 +395,7 @@ export default function useVoiceInput(
             chatCtxResult.channelType,
           );
           if (result.text && onTranscribed) {
+            emitTranscribeResult(result.text, "remote", utteranceId, blob, result.request_id);
             onTranscribed(result.text);
           }
         } catch (err) {
