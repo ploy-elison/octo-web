@@ -11,11 +11,15 @@ export interface VoiceConfig {
   local_timeout_ms?: number;
   local_probe_url?: string;
   local_transcribe_url?: string;
+  feedback_url?: string;
+  engine?: string;
+  edit_mode?: string;
 }
 
 export interface TranscribeResult {
   text: string;
   m: string; // shortened model name from backend
+  request_id?: string;
 }
 
 export interface VoiceContextResponse {

@@ -5,6 +5,7 @@ import VoiceService, {
   VoiceContextResponse,
   VoiceMode,
 } from "../../Service/VoiceService";
+import VoiceFeedback from "../../Service/VoiceFeedback";
 import LocalModelService, { LocalModelConfig } from "../../Service/LocalModelService";
 import WKApp from "../../App";
 import { ChatContextResult } from "../Conversation/chatContext";
@@ -16,6 +17,7 @@ export interface UseVoiceInputOptions {
   onRecordingFailed?: () => void;
   getChatContext?: () => ChatContextResult | Promise<ChatContextResult>;
   mode?: VoiceMode;
+  scene?: string;
 }
 
 export interface UseVoiceInputReturn {
@@ -27,6 +29,7 @@ export interface UseVoiceInputReturn {
   isVoiceEnabled: boolean;
   currentMode: VoiceMode;
   localAvailable: boolean;
+  currentUtteranceId: string;
 }
 
 function getSupportedMimeType(): string {
@@ -49,6 +52,7 @@ export default function useVoiceInput(
     onRecordingFailed,
     getChatContext,
     mode = "smart",
+    scene = "chat",
   } = options;
 
   const [isRecording, setIsRecording] = useState(false);
@@ -66,6 +70,7 @@ export default function useVoiceInput(
   const startTimeRef = useRef<number>(0);
   const contextTextRef = useRef<string | undefined>(undefined);
   const recordingModeRef = useRef<VoiceMode>(mode);
+  const utteranceIdRef = useRef("");
 
   const getChatContextRef = useRef(getChatContext);
   getChatContextRef.current = getChatContext;
@@ -99,6 +104,7 @@ export default function useVoiceInput(
         if (config.max_duration != null) {
           backendMaxDurationRef.current = config.max_duration;
         }
+        VoiceFeedback.init(config.feedback_url);
         const localTimeout = config.local_timeout_ms ?? LOCAL_DEFAULT_TIMEOUT_MS;
 
         if (localAllowed) {
@@ -168,6 +174,10 @@ export default function useVoiceInput(
       // 保存本次录音使用的 mode
       recordingModeRef.current = overrideMode ?? mode;
       setCurrentMode(recordingModeRef.current);
+
+      utteranceIdRef.current =
+        crypto.randomUUID?.() ??
+        Math.random().toString(36).slice(2) + Date.now().toString(36);
 
       voiceContextRef.current = null;
 
@@ -268,6 +278,16 @@ export default function useVoiceInput(
         }
 
         setIsTranscribing(true);
+        const notifyFeedback = (text: string, source: "local" | "remote", requestId?: string) => {
+          VoiceFeedback.shared()?.onTranscribeResult({
+            utteranceId: utteranceIdRef.current,
+            modelText: text,
+            source,
+            requestId,
+            scene,
+            audioBlob: source === "local" ? blob : undefined,
+          });
+        };
         try {
           const localConfig = LocalModelService.shared.config;
           const useLocalFirst =
@@ -310,8 +330,9 @@ export default function useVoiceInput(
                 recordingModeRef.current,
               );
             if (localResult) {
-              if (localResult.text && onTranscribed) {
-                onTranscribed(localResult.text);
+              if (localResult.text) {
+                notifyFeedback(localResult.text, "local");
+                if (onTranscribed) onTranscribed(localResult.text);
               }
               return;
             }
@@ -332,8 +353,9 @@ export default function useVoiceInput(
               true,
               chatCtxResult.channelType,
             );
-            if (result.text && onTranscribed) {
-              onTranscribed(result.text);
+            if (result.text) {
+              notifyFeedback(result.text, "remote", result.request_id);
+              if (onTranscribed) onTranscribed(result.text);
             }
             return;
           }
@@ -371,8 +393,9 @@ export default function useVoiceInput(
             true,
             chatCtxResult.channelType,
           );
-          if (result.text && onTranscribed) {
-            onTranscribed(result.text);
+          if (result.text) {
+            notifyFeedback(result.text, "remote", result.request_id);
+            if (onTranscribed) onTranscribed(result.text);
           }
         } catch (err) {
           // PRD: 转写失败时 Toast「转写失败，请重试」
@@ -428,5 +451,6 @@ export default function useVoiceInput(
     isVoiceEnabled,
     currentMode,
     localAvailable,
+    currentUtteranceId: utteranceIdRef.current,
   };
 }

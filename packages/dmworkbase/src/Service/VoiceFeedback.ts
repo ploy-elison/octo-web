@@ -1,0 +1,114 @@
+interface PendingUtterance {
+  utteranceId: string;
+  modelText: string;
+  source: "local" | "remote";
+  requestId?: string;
+  scene?: string;
+  audioBlob?: Blob;
+  timestamp: number;
+}
+
+export default class VoiceFeedback {
+  private static instance: VoiceFeedback | null = null;
+  private feedbackUrl: string;
+  private pending = new Map<string, PendingUtterance>();
+  private readonly EXPIRE_MS = 120_000;
+
+  private constructor(feedbackUrl: string) {
+    this.feedbackUrl = feedbackUrl;
+  }
+
+  static init(feedbackUrl?: string): void {
+    if (!feedbackUrl) {
+      VoiceFeedback.instance = null;
+      return;
+    }
+    VoiceFeedback.instance = new VoiceFeedback(feedbackUrl.replace(/\/+$/, ""));
+  }
+
+  static shared(): VoiceFeedback | null {
+    return VoiceFeedback.instance;
+  }
+
+  onTranscribeResult(params: {
+    utteranceId: string;
+    modelText: string;
+    source: "local" | "remote";
+    requestId?: string;
+    scene?: string;
+    audioBlob?: Blob;
+  }): void {
+    this.pending.set(params.utteranceId, {
+      ...params,
+      timestamp: Date.now(),
+    });
+
+    if (params.source === "local" && params.audioBlob) {
+      this.uploadLocal(this.pending.get(params.utteranceId)!).catch(() => {});
+    }
+
+    this.cleanExpired();
+  }
+
+  onTextSubmit(params: { utteranceId: string; userText: string }): void {
+    const utterance = this.pending.get(params.utteranceId);
+    if (!utterance) return;
+
+    this.uploadFinal(utterance, params.userText).catch(() => {});
+    this.pending.delete(params.utteranceId);
+  }
+
+  submitAll(userText: string): void {
+    for (const entry of this.pending.values()) {
+      this.uploadFinal(entry, userText).catch(() => {});
+    }
+    this.pending.clear();
+  }
+
+  private async uploadLocal(u: PendingUtterance): Promise<void> {
+    if (!u.audioBlob) return;
+    const form = new FormData();
+    form.append("audio", u.audioBlob, `${u.utteranceId}.webm`);
+    form.append(
+      "metadata",
+      JSON.stringify({
+        utterance_id: u.utteranceId,
+        text: u.modelText,
+        source: u.source,
+        scene: u.scene || "",
+      }),
+    );
+    await fetch(`${this.feedbackUrl}/local`, {
+      method: "POST",
+      body: form,
+    });
+  }
+
+  private async uploadFinal(
+    u: PendingUtterance,
+    userText: string,
+  ): Promise<void> {
+    await fetch(`${this.feedbackUrl}/final`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        utterance_id: u.utteranceId,
+        model_text: u.modelText,
+        user_text: userText,
+        source: u.source,
+        request_id: u.requestId || "",
+        scene: u.scene || "",
+        ts: Date.now(),
+      }),
+    });
+  }
+
+  private cleanExpired(): void {
+    const now = Date.now();
+    for (const [id, entry] of this.pending) {
+      if (now - entry.timestamp > this.EXPIRE_MS) {
+        this.pending.delete(id);
+      }
+    }
+  }
+}
