@@ -5,7 +5,7 @@ import { BoardSession } from '../board/BoardSession.tsx'
 import { isBoardDoc, isBoardIdLocally, rememberBoard } from '../board/boardStore.ts'
 import '../editor/styles.css'
 import { DEFAULT_DOC_SPACE, DEFAULT_DOC_FOLDER, DEFAULT_DOC_ID } from '../config.ts'
-import { listDocs, createDoc, type DocListItem } from './docsApi.ts'
+import { listDocs, createDoc, getDoc, type DocListItem } from './docsApi.ts'
 import { useMemberNames } from '../members/useMemberNames.ts'
 import { formatRelative, formatAbsolute } from '../versions/format.ts'
 
@@ -387,6 +387,16 @@ function DocsList({
             const hasTitle = !!d.title && d.title.trim().length > 0
             const label = hasTitle ? d.title : t('docs.state.untitled')
             const board = isBoardDoc(d)
+            // Kind we can assert without a round-trip: a known board (API `docType==='board'` or
+            // the creator's local registry, both via isBoardDoc) or an explicit `'doc'`. When the
+            // list API omitted docType AND we have no local board record — a NON-creator viewing a
+            // shared board — pass `undefined` so openDoc resolves the authoritative kind via getDoc
+            // instead of defaulting that member to the rich-text editor (the M2 routing bug).
+            const knownKind: 'board' | 'doc' | undefined = board
+              ? 'board'
+              : d.docType === 'doc'
+                ? 'doc'
+                : undefined
             return (
               <li
                 key={d.docId}
@@ -397,7 +407,7 @@ function DocsList({
                 <button
                   type="button"
                   className="octo-docs-list-row"
-                  onClick={() => onSelect(d.docId, board ? 'board' : 'doc')}
+                  onClick={() => onSelect(d.docId, knownKind)}
                   aria-current={active ? 'true' : undefined}
                 >
                   <span
@@ -592,8 +602,11 @@ export function DocsHome() {
     [buildBoard, buildEditor],
   )
 
-  const openDoc = useCallback(
-    (docId: string, docType?: string) => {
+  // Commit an open once the doc's kind is known: set selection state, mirror the target
+  // (durable sessionStorage + shareable `?doc=` URL), and push the matching shell into the host's
+  // right pane. Split out from openDoc so the kind can be resolved asynchronously first.
+  const commitOpen = useCallback(
+    (docId: string, docType: 'board' | 'doc') => {
       setSelectedDocId(docId)
       setSelectedDocType(docType)
       // Durable mirror (survives the host's query-wiping re-push) + shareable URL (replaceState,
@@ -611,6 +624,39 @@ export function DocsHome() {
       }
     },
     [space, folder, routeRight, buildContent],
+  )
+
+  // Tracks the most recently requested open so an in-flight kind lookup that resolves after a
+  // newer click is discarded — the latest selection always wins (no stale shell from a race).
+  const latestOpenRef = useRef<string | null>(null)
+
+  const openDoc = useCallback(
+    (docId: string, docType?: string) => {
+      latestOpenRef.current = docId
+      // Known kind — the creator's own board (API `docType` or the local registry, both surfaced
+      // by isBoardDoc at the call site) or an explicit `'doc'`: open the right shell immediately.
+      if (docType === 'board' || docType === 'doc') {
+        commitOpen(docId, docType)
+        return
+      }
+      // Unknown kind: the list API omitted `docType` AND this client has no local board record.
+      // That is exactly the non-creator gap — the M1 board-kind fallback (a creator-local
+      // localStorage registry) cannot cover other members, so a shared board would wrongly open
+      // in the rich-text editor (canvas=0). Resolve the authoritative kind from the per-doc meta
+      // (GET /docs/{id}) before choosing a shell, so a board opens as a board for every member.
+      // Default to the rich-text editor only when the lookup can't confirm a board (legacy docs /
+      // a backend that doesn't persist docType).
+      getDoc(docId)
+        .then((meta) => {
+          if (latestOpenRef.current !== docId) return // superseded by a newer open
+          commitOpen(docId, meta?.docType === 'board' ? 'board' : 'doc')
+        })
+        .catch(() => {
+          if (latestOpenRef.current !== docId) return
+          commitOpen(docId, 'doc')
+        })
+    },
+    [commitOpen],
   )
 
   // On mount, ALWAYS occupy the right pane so the host chat placeholder never shows through
