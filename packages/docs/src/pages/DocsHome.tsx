@@ -343,7 +343,7 @@ function DocsList({
     setCreating(true)
     try {
       const created = await createDoc({
-        title: t('docs.state.untitled'),
+        title: docType === 'board' ? t('docs.board.untitled') : t('docs.state.untitled'),
         spaceId: space || undefined,
         folderId: folder || undefined,
         // Pass the kind through the docType seam; the backend stamps the new doc accordingly and
