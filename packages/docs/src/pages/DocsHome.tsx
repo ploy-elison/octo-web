@@ -1,6 +1,8 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { getWKApp, getRouteRight, t } from '../octoweb/index.ts'
 import { EditorShell } from '../editor/EditorShell.tsx'
+import { BoardShell } from '../board/BoardShell.tsx'
+import { isBoardDoc, isBoardIdLocally, rememberBoard } from '../board/boardStore.ts'
 import '../editor/styles.css'
 import { DEFAULT_DOC_SPACE, DEFAULT_DOC_FOLDER, DEFAULT_DOC_ID } from '../config.ts'
 import { listDocs, createDoc, type DocListItem } from './docsApi.ts'
@@ -12,6 +14,8 @@ export interface DocTarget {
   folder: string
   doc: string
   docId: string
+  /** `'board'` opens the whiteboard shell; anything else (incl. absent) opens the rich-text editor. */
+  docType?: string
 }
 
 /**
@@ -30,12 +34,12 @@ export interface DocTarget {
 const TARGET_STORAGE_KEY = 'octo.docs.target'
 
 /** Mirror the active doc target to sessionStorage so it survives the host's query-wiping. */
-function persistDocTarget(target: { space: string; folder: string; doc: string }): void {
+function persistDocTarget(target: { space: string; folder: string; doc: string; docType?: string }): void {
   if (typeof window === 'undefined') return
   try {
     window.sessionStorage.setItem(
       TARGET_STORAGE_KEY,
-      JSON.stringify({ space: target.space, folder: target.folder, doc: target.doc }),
+      JSON.stringify({ space: target.space, folder: target.folder, doc: target.doc, docType: target.docType }),
     )
   } catch {
     // sessionStorage unavailable (private mode / disabled): the deep-link still opens on
@@ -67,6 +71,14 @@ function readDocTarget(): DocTarget | null {
         typeof parsed.folder === 'string' && parsed.folder ? parsed.folder : DEFAULT_DOC_FOLDER,
       doc: parsed.doc,
       docId: parsed.doc,
+      // Trust a stored docType; otherwise fall back to the local board registry so a refresh
+      // re-opens a board as a board even if the mirror predates the docType field.
+      docType:
+        typeof parsed.docType === 'string' && parsed.docType
+          ? parsed.docType
+          : isBoardIdLocally(parsed.doc)
+            ? 'board'
+            : undefined,
     }
   } catch {
     return null
@@ -101,9 +113,12 @@ export function resolveDocTarget(search: string): DocTarget | null {
   }
 
   // 1. Deep-link via query. Persist it so the editor stays addressable after the host's
-  //    pathname-only re-push wipes `?doc=` (the second-blocker root cause).
+  //    pathname-only re-push wipes `?doc=` (the second-blocker root cause). Addressing stays a
+  //    single `?doc=` param (three-party-fixed), so the kind is resolved from the local board
+  //    registry rather than a separate query param.
   if (queryDoc) {
-    const target: DocTarget = { space, folder, doc: queryDoc, docId: queryDoc }
+    const docType = isBoardIdLocally(queryDoc) ? 'board' : undefined
+    const target: DocTarget = { space, folder, doc: queryDoc, docId: queryDoc, docType }
     persistDocTarget(target)
     return target
   }
@@ -159,6 +174,120 @@ function mirrorListToUrl(): void {
   }
 }
 
+/** Document row glyph (sheet of paper with lines) — the existing Docs list icon. */
+function DocRowIcon(): React.ReactElement {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M4 1.5h5L12.5 5v9a.5.5 0 0 1-.5.5H4a.5.5 0 0 1-.5-.5V2a.5.5 0 0 1 .5-.5Z"
+        stroke="currentColor"
+        strokeWidth="1"
+        fill="none"
+      />
+      <path d="M9 1.5V5h3.5" stroke="currentColor" strokeWidth="1" fill="none" />
+    </svg>
+  )
+}
+
+/** Board row glyph — an Excalidraw-style sketch (overlapping square + circle) to mark whiteboards. */
+function BoardRowIcon(): React.ReactElement {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="2" y="3" width="8" height="7" rx="1" stroke="currentColor" strokeWidth="1" fill="none" />
+      <circle cx="10.5" cy="9.5" r="3" stroke="currentColor" strokeWidth="1" fill="none" />
+    </svg>
+  )
+}
+
+/** Caret for the split "new" button. */
+function CaretIcon(): React.ReactElement {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+      <path d="M3 4.5 6 7.5 9 4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+/**
+ * "New" entry as a split / dropdown button (frontend-design §4.1): the primary action creates a
+ * document; the caret opens a small menu to choose Document or Board. A disabled "Sheet" row holds
+ * the reserved slot for the future table type. Dependency-free dropdown (click-away + Esc to
+ * close), matching the lightweight popups elsewhere in docs.
+ */
+function NewDocMenu({
+  creating,
+  onCreate,
+}: {
+  creating: boolean
+  onCreate: (docType: 'doc' | 'board') => void
+}): React.ReactElement {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDocMouseDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocMouseDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocMouseDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  const choose = (docType: 'doc' | 'board') => {
+    setOpen(false)
+    onCreate(docType)
+  }
+
+  return (
+    <div className="octo-docs-new-split" ref={wrapRef}>
+      <button
+        type="button"
+        className="octo-docs-list-new octo-docs-new-primary"
+        onClick={() => choose('doc')}
+        disabled={creating}
+      >
+        <span className="octo-docs-list-new-icon" aria-hidden="true">+</span>
+        {t('docs.list.new')}
+      </button>
+      <button
+        type="button"
+        className="octo-docs-list-new octo-docs-new-caret"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={t('docs.list.newMenu')}
+        disabled={creating}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <CaretIcon />
+      </button>
+      {open && (
+        <div className="octo-docs-new-menu" role="menu">
+          <button type="button" role="menuitem" className="octo-docs-new-menu-item" onClick={() => choose('doc')}>
+            <span className="octo-docs-new-menu-icon" aria-hidden="true"><DocRowIcon /></span>
+            {t('docs.list.newDocument')}
+          </button>
+          <button type="button" role="menuitem" className="octo-docs-new-menu-item" onClick={() => choose('board')}>
+            <span className="octo-docs-new-menu-icon" aria-hidden="true"><BoardRowIcon /></span>
+            {t('docs.list.newBoard')}
+          </button>
+          <button type="button" role="menuitem" className="octo-docs-new-menu-item" disabled aria-disabled="true">
+            <span className="octo-docs-new-menu-icon" aria-hidden="true">▦</span>
+            {t('docs.list.newSheet')}
+            <span className="octo-docs-new-menu-soon">{t('docs.list.comingSoon')}</span>
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /**
  * Document list landing — shown when `/docs` is opened without a specific doc addressed.
  * Lists documents the caller owns or is a member of (GET /api/v1/docs) and offers a
@@ -174,7 +303,7 @@ function DocsList({
   space: string
   folder: string
   selectedDocId: string | null
-  onSelect: (docId: string) => void
+  onSelect: (docId: string, docType?: string) => void
   reloadToken?: number
 }): React.ReactElement {
   const [items, setItems] = useState<DocListItem[]>([])
@@ -209,7 +338,7 @@ function DocsList({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadToken])
 
-  const onCreate = async () => {
+  const onCreate = async (docType: 'doc' | 'board') => {
     if (creating) return
     setCreating(true)
     try {
@@ -217,9 +346,14 @@ function DocsList({
         title: t('docs.state.untitled'),
         spaceId: space || undefined,
         folderId: folder || undefined,
+        // Pass the kind through the docType seam; the backend stamps the new doc accordingly and
+        // the creator becomes admin (AC3). For boards, also record the id locally so a refresh /
+        // deep-link re-opens the whiteboard even if the list response omits docType.
+        docType,
       })
+      if (docType === 'board') rememberBoard(created.docId)
       // New docs land in the list; select it inline (right pane opens, list stays).
-      onSelect(created.docId)
+      onSelect(created.docId, created.docType || docType)
       reload()
       setCreating(false)
     } catch {
@@ -232,15 +366,7 @@ function DocsList({
     <div className="octo-docs-list">
       <div className="octo-docs-list-header">
         <h2 className="octo-docs-list-title">{t('docs.menu.title')}</h2>
-        <button
-          type="button"
-          className="octo-docs-list-new"
-          onClick={onCreate}
-          disabled={creating}
-        >
-          <span className="octo-docs-list-new-icon" aria-hidden="true">+</span>
-          {t('docs.list.new')}
-        </button>
+        <NewDocMenu creating={creating} onCreate={onCreate} />
       </div>
       {loading && <p className="octo-docs-list-state">{t('docs.state.loading')}</p>}
       {error && !loading && (
@@ -260,6 +386,7 @@ function DocsList({
             const active = d.docId === selectedDocId
             const hasTitle = !!d.title && d.title.trim().length > 0
             const label = hasTitle ? d.title : t('docs.state.untitled')
+            const board = isBoardDoc(d)
             return (
               <li
                 key={d.docId}
@@ -270,19 +397,15 @@ function DocsList({
                 <button
                   type="button"
                   className="octo-docs-list-row"
-                  onClick={() => onSelect(d.docId)}
+                  onClick={() => onSelect(d.docId, board ? 'board' : 'doc')}
                   aria-current={active ? 'true' : undefined}
                 >
-                  <span className="octo-docs-list-row-icon" aria-hidden="true">
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                      <path
-                        d="M4 1.5h5L12.5 5v9a.5.5 0 0 1-.5.5H4a.5.5 0 0 1-.5-.5V2a.5.5 0 0 1 .5-.5Z"
-                        stroke="currentColor"
-                        strokeWidth="1"
-                        fill="none"
-                      />
-                      <path d="M9 1.5V5h3.5" stroke="currentColor" strokeWidth="1" fill="none" />
-                    </svg>
+                  <span
+                    className="octo-docs-list-row-icon"
+                    aria-label={board ? t('docs.list.kindBoard') : t('docs.list.kindDoc')}
+                    title={board ? t('docs.list.kindBoard') : t('docs.list.kindDoc')}
+                  >
+                    {board ? <BoardRowIcon /> : <DocRowIcon />}
                   </span>
                   <span className="octo-docs-list-row-text">
                     <span
@@ -340,12 +463,17 @@ export function DocsHome() {
 
   // Initial selection from URL deep-link / persisted target (so a shared `/docs?doc=` or a
   // refresh opens that doc in the right pane on first paint).
-  const [selectedDocId, setSelectedDocId] = useState<string | null>(() => {
-    const initial = resolveDocTarget(
-      typeof window !== 'undefined' ? window.location.search : '',
-    )
-    return initial?.docId ?? null
-  })
+  const initialTarget = useRef(
+    resolveDocTarget(typeof window !== 'undefined' ? window.location.search : ''),
+  )
+  const [selectedDocId, setSelectedDocId] = useState<string | null>(
+    () => initialTarget.current?.docId ?? null,
+  )
+  // The kind of the open doc (`'board'` → whiteboard shell, else rich-text editor). Tracked
+  // alongside the id so the right pane renders the correct shell across deep-link / refresh.
+  const [selectedDocType, setSelectedDocType] = useState<string | undefined>(
+    () => initialTarget.current?.docType,
+  )
 
   // The host's right (main) route pane. When present (production), the editor is pushed there
   // so it fills the main content area while the list stays in the left route slot — the same
@@ -383,6 +511,7 @@ export function DocsHome() {
 
   const backToList = useCallback(() => {
     setSelectedDocId(null)
+    setSelectedDocType(undefined)
     clearDocTarget()
     mirrorListToUrl()
     if (routeRight) {
@@ -432,36 +561,63 @@ export function DocsHome() {
     [uid, space, folder, names, onTitleSaved, backToList, onDocDeleted],
   )
 
+  // Whiteboard counterpart of buildEditor — same lifecycle wiring (exit / rename / delete), but
+  // renders the Excalidraw shell. Used when the selected doc's kind is `'board'`.
+  const buildBoard = useCallback(
+    (docId: string, onBack?: () => void) => (
+      <BoardShell
+        key={docId}
+        docId={docId}
+        title={t('docs.state.untitled')}
+        space={space}
+        onBack={onBack}
+        onExit={backToList}
+        onTitleSaved={onTitleSaved}
+        onDeleted={onDocDeleted}
+      />
+    ),
+    [space, onTitleSaved, backToList, onDocDeleted],
+  )
+
+  // Pick the right shell for a doc by kind. Boards open the whiteboard; everything else (incl.
+  // unknown/absent kind) opens the rich-text editor — the safe default for legacy docs.
+  const buildContent = useCallback(
+    (docId: string, docType?: string, onBack?: () => void) =>
+      docType === 'board' ? buildBoard(docId, onBack) : buildEditor(docId, onBack),
+    [buildBoard, buildEditor],
+  )
+
   const openDoc = useCallback(
-    (docId: string) => {
+    (docId: string, docType?: string) => {
       setSelectedDocId(docId)
+      setSelectedDocType(docType)
       // Durable mirror (survives the host's query-wiping re-push) + shareable URL (replaceState,
       // no host re-push) — together neutralizing the `?doc=` strip should-fix.
-      persistDocTarget({ space, folder, doc: docId })
+      persistDocTarget({ space, folder, doc: docId, docType })
       mirrorDocToUrl(docId, space, folder)
-      // Full-width path: push the editor into the host's main (right) pane, list stays left.
+      // Full-width path: push the editor/board into the host's main (right) pane, list stays left.
       // No header back button here (#2) — the resident list is the way back.
       if (routeRight) {
         try {
-          routeRight.replaceToRoot(buildEditor(docId) as unknown)
+          routeRight.replaceToRoot(buildContent(docId, docType) as unknown)
         } catch {
           // ignore — fall back to inline render below if the host pane rejects.
         }
       }
     },
-    [space, folder, routeRight, buildEditor],
+    [space, folder, routeRight, buildContent],
   )
 
   // On mount, ALWAYS occupy the right pane so the host chat placeholder never shows through
   // (the contentRight race). If a doc is pre-selected (deep-link / persisted target) push the
-  // editor; otherwise push the docs empty state. Either way the routeRight queue is non-empty
-  // from first paint, so entering /docs is deterministically full-width docs — never the
-  // intermittent chat-placeholder regression.
+  // editor/board; otherwise push the docs empty state. Either way the routeRight queue is
+  // non-empty from first paint, so entering /docs is deterministically full-width docs — never
+  // the intermittent chat-placeholder regression.
   useEffect(() => {
     if (!routeRight) return
     try {
       if (selectedDocId) {
-        routeRight.replaceToRoot(buildEditor(selectedDocId) as unknown)
+        routeRight.replaceToRoot(buildContent(selectedDocId, selectedDocType) as unknown)
       } else {
         routeRight.replaceToRoot(buildEmptyState() as unknown)
       }
@@ -502,7 +658,7 @@ export function DocsHome() {
       </aside>
       <section className="octo-docs-split-right">
         {selectedDocId ? (
-          buildEditor(selectedDocId, backToList)
+          buildContent(selectedDocId, selectedDocType, backToList)
         ) : (
           <div className="octo-docs-split-empty">
             <p>{t('docs.state.empty')}</p>

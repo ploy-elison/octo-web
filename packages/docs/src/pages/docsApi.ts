@@ -13,6 +13,13 @@ export interface DocListItem {
   ownerId: string
   role: Role
   updatedAt?: string
+  /**
+   * Document kind: `'doc'` (Tiptap rich text, the default) or `'board'` (Excalidraw whiteboard).
+   * Optional because older records and backends that predate the whiteboard feature omit it; a
+   * missing value is treated as a plain document. The list mixes both kinds and distinguishes
+   * them by icon (frontend-design §4.1 / §5.1).
+   */
+  docType?: string
 }
 
 export interface ListDocsResult {
@@ -28,6 +35,8 @@ export interface CreateDocResult {
   folderId: string
   ownerId: string
   role: Role
+  /** Echoed back when the backend persists the requested `docType` (else absent). */
+  docType?: string
 }
 
 export interface ListDocsParams {
@@ -68,6 +77,8 @@ export interface DocMeta {
   ownerId?: string
   role?: Role
   updatedAt?: string
+  /** `'doc'` | `'board'` — see DocListItem.docType. Absent on backends that don't persist it. */
+  docType?: string
 }
 
 /**

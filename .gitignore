@@ -74,3 +74,6 @@ docs/superpowers/plans/
 /cc-*.json
 grp_out.txt
 .cctmp/
+
+# docs standalone dev build output
+packages/docs/dev-dist/
