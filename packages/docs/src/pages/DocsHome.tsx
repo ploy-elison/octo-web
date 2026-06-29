@@ -574,13 +574,14 @@ export function DocsHome() {
         uid={uid}
         space={space}
         folder={folder}
+        userName={names.get(uid) || uid}
         onBack={onBack}
         onExit={backToList}
         onTitleSaved={onTitleSaved}
         onDeleted={onDocDeleted}
       />
     ),
-    [uid, space, folder, onTitleSaved, backToList, onDocDeleted],
+    [uid, space, folder, names, onTitleSaved, backToList, onDocDeleted],
   )
 
   // Pick the right shell for a doc by kind. Boards open the whiteboard; everything else (incl.
