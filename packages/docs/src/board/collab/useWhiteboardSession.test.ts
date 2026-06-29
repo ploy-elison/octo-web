@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { setWKApp } from '../../octoweb/index.ts'
 import { createMockWKApp } from '../../octoweb/mock.ts'
-import { WS_ENDPOINT } from '../../config.ts'
+import { resolveCollabWsUrl } from '../../config.ts'
 import { __resetTokenCacheForTests } from '../../auth/collabToken.ts'
 
 // The session assembler builds a real HocuspocusProvider (opens a WebSocket); stub it so the hook's
@@ -20,11 +20,31 @@ vi.mock('./connect.ts', () => ({
 
 let wk: ReturnType<typeof createMockWKApp>
 
+const COLLAB_WS_URL = 'wss://collab.test.example.com'
+
 beforeEach(() => {
   created.length = 0
   wk = createMockWKApp()
   setWKApp(wk)
   __resetTokenCacheForTests()
+  // The session now resolves its WS origin from the collab-token response before building the
+  // provider (token-first, mirroring the doc editor), so a valid token is required for the hook
+  // to produce a session. Individual tests may override this responder.
+  wk.apiClient.responder = (method, url) => {
+    if (method === 'post' && url === '/docs/collab-token') {
+      return {
+        data: {
+          token: 'wb-jwt',
+          expiresAt: Date.now() + 60_000,
+          role: 'writer',
+          permission_epoch: 1,
+          collabWsUrl: COLLAB_WS_URL,
+        },
+        status: 200,
+      }
+    }
+    return { data: {}, status: 200 }
+  }
 })
 
 afterEach(() => vi.restoreAllMocks())
@@ -34,14 +54,14 @@ async function importHook() {
 }
 
 describe('useWhiteboardSession — board collab wiring (XIN-55)', () => {
-  it('opens a session sourced from WS_ENDPOINT and returns it', async () => {
+  it('opens a session whose WS origin is resolved from the collab-token response and returns it', async () => {
     const useWhiteboardSession = await importHook()
     const { result } = renderHook(() =>
       useWhiteboardSession({ uid: 'u_self', space: 'demo', folder: 'f_default', board: 'd_board1' }),
     )
     await waitFor(() => expect(result.current).not.toBeNull())
     expect(created).toHaveLength(1)
-    expect(created[0]!.opts.url).toBe(WS_ENDPOINT)
+    expect(created[0]!.opts.url).toBe(resolveCollabWsUrl(COLLAB_WS_URL))
     expect(created[0]!.opts.space).toBe('demo')
     expect(created[0]!.opts.board).toBe('d_board1')
   })

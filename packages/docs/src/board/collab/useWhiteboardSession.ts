@@ -2,11 +2,12 @@
 //
 // A board-level registry keyed by `${uid}::${documentName}` makes account / board switches isolate
 // naturally and survives StrictMode's double-invoked effects (idempotent create + refcount), the
-// same shape useCollabEditor uses for the doc editor. Unlike CollabEditor.create — which awaits the
-// collab-token exchange to learn the initial role BEFORE building the provider — the board does not
-// gate editability on a pre-connect role (BoardShell resolves the caller's role separately via
-// getDoc, and Excalidraw is view-mode-toggled from that). So the session is built synchronously and
-// the collab token is fetched lazily by the provider's token getter on connect.
+// same shape useCollabEditor uses for the doc editor. The board does not gate editability on a
+// pre-connect role (BoardShell resolves the caller's role separately via getDoc, and Excalidraw is
+// view-mode-toggled from that), but it DOES await the collab-token exchange before building the
+// provider — the WS origin is delivered at runtime in that response (`collabWsUrl`, backend
+// XIN-211) and resolved via resolveCollabWsUrl, mirroring CollabEditor.create. The eager fetch
+// primes the token cache the provider's own getter reads on connect, so there is no extra round-trip.
 //
 // Token contract: the board reuses the doc editor's collab-token flow — POST /docs/collab-token
 // with the whiteboard documentName `octo:{space}:{folder}:wb:{board}`. The backend's unified WS
@@ -16,8 +17,8 @@
 import { useEffect, useState } from 'react'
 import { createWhiteboardSession, type WhiteboardSession } from './connect.ts'
 import { buildWhiteboardName } from './schema.ts'
-import { WS_ENDPOINT } from '../../config.ts'
-import { getCollabToken } from '../../auth/collabToken.ts'
+import { resolveCollabWsUrl } from '../../config.ts'
+import { getCollabToken, getCollabTokenEntry } from '../../auth/collabToken.ts'
 
 export interface UseWhiteboardSessionOptions {
   uid: string
@@ -71,21 +72,38 @@ export function useWhiteboardSession(opts: UseWhiteboardSessionOptions): Whitebo
 
   useEffect(() => {
     let active = true
-    const entry = acquire(key, () =>
-      createWhiteboardSession({
-        space,
-        folder,
-        board,
-        url: WS_ENDPOINT,
-        token: () => getCollabToken(documentName),
-        disableOfflineCache,
-      }),
-    )
-    if (active) setSession(entry.session)
+    let acquiredKey: string | null = null
+
+    // Resolve the WS origin from the collab-token response before building the provider: prefer
+    // the backend-issued `collabWsUrl`, falling back to the legacy build-time env when absent
+    // (resolveCollabWsUrl). This is the same runtime contract the doc editor uses; the eager token
+    // fetch is cached, so the provider's own getter reuses it on connect.
+    getCollabTokenEntry(documentName)
+      .then((entry) => {
+        if (!active) return
+        const url = resolveCollabWsUrl(entry.collabWsUrl)
+        const acquired = acquire(key, () =>
+          createWhiteboardSession({
+            space,
+            folder,
+            board,
+            url,
+            token: () => getCollabToken(documentName),
+            disableOfflineCache,
+          }),
+        )
+        acquiredKey = key
+        setSession(acquired.session)
+      })
+      .catch(() => {
+        // Token issuance failed (not_found / network): leave the session null so BoardShell
+        // surfaces the failure instead of connecting to an unresolved endpoint.
+      })
+
     return () => {
       active = false
       setSession(null)
-      release(key)
+      if (acquiredKey) release(acquiredKey)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]) // ⚠️ keyed by uid + whiteboard documentName — switching either rebuilds.
