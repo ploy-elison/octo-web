@@ -502,6 +502,7 @@ export function StandaloneDocPage({
           space={addressing.space}
           folder={addressing.folder}
           userName={names.get(uid) || uid}
+          creatorNicknameOnly
         />
       </div>
     )
