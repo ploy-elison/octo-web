@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import { getWKApp, t } from '../octoweb/index.ts'
 import { EditorShell } from '../editor/EditorShell.tsx'
 import { BoardSession } from '../board/BoardSession.tsx'
+import { SheetView } from '../sheet/SheetView.tsx'
 import { DocTerminal, type TerminalKind } from '../editor/DocTerminal.tsx'
 import { RequestAccessButton } from '../access-request/RequestAccessButton.tsx'
 import { LinkIcon, type DocMoreMenuItem } from '../editor/DocMoreMenu.tsx'
@@ -392,13 +393,16 @@ export function StandaloneDocPage({
   const onCopyLink = useCallback(async () => {
     if (typeof window === 'undefined') return
     try {
-      // Copy the CANONICAL share link — origin + `/d/:docId` only — never the live URL. The current
-      // address may carry session-scoped query params (notably `?sid=`, added when opening a doc in a
-      // new page / returning post-login), and copying window.location.href would leak the sharer's own
-      // session id into the shared link. Strip the whole query (and any hash) so what is shared is the
-      // clean document link every recipient should get; the recipient's own session resolves normally.
+      // Copy the CANONICAL share link — origin + `/d/:docId` — carrying only the doc's real space
+      // `?sp=` and NEVER the session-scoped `?sid=`. The live URL can carry `?sid=` (the sharer's
+      // own token-bucket key, added when opening a doc in a new page / returning post-login); copying
+      // window.location.href verbatim would leak the sharer's session id into the shared link. So we
+      // rebuild from the path and re-attach ONLY `?sp` (the doc's own space, XIN-501 preflight
+      // addressing), which every recipient needs and which is safe to share. The recipient's own
+      // session is recovered from storage independently of the link (XIN-513), so no `?sid` is needed.
       const here = new URL(window.location.href)
-      const canonical = here.origin + here.pathname
+      const sp = standaloneLinkSpace()
+      const canonical = here.origin + here.pathname + (sp ? `?sp=${encodeURIComponent(sp)}` : '')
       await navigator.clipboard?.writeText(canonical)
       // Drive the menu-external "Link copied" toast (below). The menu closes on selection, so this
       // confirmation must live outside the (now-unmounted) menu panel — hence page-level state, not
@@ -522,18 +526,37 @@ export function StandaloneDocPage({
 
   return (
     <div className="octo-doc-standalone">
-      <EditorShell
-        key={editorDocId}
-        docId={editorDocId}
-        title={meta.title || t('docs.state.untitled')}
-        uid={uid}
-        space={addressing.space}
-        folder={addressing.folder}
-        doc={addressing.doc}
-        user={{ id: uid, name: names.get(uid) || uid }}
-        moreMenuLeadItems={moreMenuLeadItems}
-        creatorNicknameOnly
-      />
+      {meta.docType === 'sheet' ? (
+        // A shared /d/:docId that resolves to a spreadsheet mounts the collaborative SheetView, not
+        // the Tiptap EditorShell — so forwarded / open-in-new-page sheet links open correctly (parity
+        // with the in-shell docType branch in DocsHome). Same standalone chrome: "Copy link" as the ≡
+        // menu's top row, nickname-only creator (external surface), and no onOpenInNewPage (this IS
+        // the standalone page).
+        <SheetView
+          key={editorDocId}
+          docId={editorDocId}
+          uid={uid}
+          space={addressing.space}
+          folder={addressing.folder}
+          doc={addressing.doc}
+          user={{ id: uid, name: names.get(uid) || uid }}
+          moreMenuLeadItems={moreMenuLeadItems}
+          creatorNicknameOnly
+        />
+      ) : (
+        <EditorShell
+          key={editorDocId}
+          docId={editorDocId}
+          title={meta.title || t('docs.state.untitled')}
+          uid={uid}
+          space={addressing.space}
+          folder={addressing.folder}
+          doc={addressing.doc}
+          user={{ id: uid, name: names.get(uid) || uid }}
+          moreMenuLeadItems={moreMenuLeadItems}
+          creatorNicknameOnly
+        />
+      )}
       {/* Menu-external "Link copied" toast. Lives outside EditorShell (and thus outside the ≡ menu
           panel that unmounts on selection), so the confirmation stays visible after the menu closes.
           Fixed overlay, auto-dismissed via the copied timer; matches the docs document-external toast
