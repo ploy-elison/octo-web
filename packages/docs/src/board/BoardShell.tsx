@@ -30,7 +30,7 @@ import { installExcalidrawDebrand } from './excalidrawDebrand.ts'
 import { installLibraryControlButtons } from './libraryControlButtons.ts'
 import type { WhiteboardSession, BoardTerminal } from './collab/index.ts'
 import type { ExcalidrawElement, BinaryFileData, FileFetchRef } from './collab/index.ts'
-import { makeGenerateIdForFile, dataURLToBlob } from './collab/index.ts'
+import { makeGenerateIdForFile, dataURLToBlob, sanitizeFractionalIndices } from './collab/index.ts'
 import { presignUpload, uploadBinary } from '../attachments/api.ts'
 import { fetchBoardFileBinaries } from './boardFiles.ts'
 import {
@@ -1011,7 +1011,11 @@ export function BoardShell(props: BoardShellProps): ReactElement {
       if (docEls.length > 0) raw = docEls
     }
     const restore = restoreElementsRef.current
-    return restore ? restore(raw, null) : [...raw]
+    // Strip any fractional-index key Excalidraw cannot parse before restore (XIN-791): this memo
+    // seeds `initialData` straight from raw Y.Doc elements (bypassing repairForRender), so a
+    // backend `r00000000`-style key would otherwise reach restoreElements and blank a cold-opened
+    // bot-written board. sanitizeFractionalIndices is a no-op for valid-keyed (human) scenes.
+    return restore ? restore(sanitizeFractionalIndices(raw as readonly ExcalidrawElement[]), null) : [...raw]
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [Excalidraw, collabSession, accessConfirmed])
 
