@@ -48,7 +48,17 @@
 //        EXACTLY url/title/description/image/siteName/fetchedAt; round-trips via data-url/
 //        data-title/data-description/data-image/data-site-name/data-fetched-at). Inserting a URL
 //        calls POST /docs/{docId}/link-card for OG metadata; only http/https URLs become cards.
-export const SCHEMA_VERSION = 15
+//   v16 — SCHEMA-SPEC §6: font-family global attr on the textStyle mark (sibling feature #59,
+//        lands on its own branch). Reserved here so the indent bump below keeps the PM-assigned
+//        number; not registered on this branch.
+//   v17 — SCHEMA-SPEC §7: line-spacing global attr on heading + paragraph (sibling feature,
+//        lands on its own branch). Reserved here for the same reason; not registered on this branch.
+//   v18 — SCHEMA-SPEC §16: add a global `indent` ATTRIBUTE to the `heading` and `paragraph`
+//        nodes (not a new node/mark) — an integer indent level rendered via margin-left and
+//        round-tripped as data-indent, configured for exactly those two types (list Tab/Shift-Tab
+//        sink/lift is untouched). Same class of change as v5 textAlign / v7 fontSize: attribute,
+//        version bump only, byte-aligned with the backend stub + SCHEMA-SPEC. Missing attr = 0.
+export const SCHEMA_VERSION = 18
 
 // Node names present in the schema at the current SCHEMA_VERSION. Mirrors the
 // backend stub's node set (SCHEMA-SPEC); kept here so the set is auditable against
@@ -88,9 +98,9 @@ export const SCHEMA_NODES = [
 // backend stub's mark set (SCHEMA-SPEC §3); kept here so the set is auditable
 // against the spec without importing the editor extensions.
 //
-// NOTE: v5 `textAlign` and v7 `fontSize` are ATTRIBUTES (textAlign on heading/paragraph,
-// fontSize on the textStyle mark), not new nodes/marks, so they add no entry here — only a
-// version bump. They still round-trip through the Y.Doc as node/mark attrs.
+// NOTE: v5 `textAlign`, v7 `fontSize` and v18 `indent` are ATTRIBUTES (textAlign + indent on
+// heading/paragraph, fontSize on the textStyle mark), not new nodes/marks, so they add no entry
+// here — only a version bump. They still round-trip through the Y.Doc as node/mark attrs.
 export const SCHEMA_MARKS = [
   'bold',
   'italic',

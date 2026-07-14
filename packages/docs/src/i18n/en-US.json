@@ -39,6 +39,8 @@
     "alignCenter": "Align center",
     "alignRight": "Align right",
     "alignJustify": "Justify",
+    "indentIncrease": "Increase indent",
+    "indentDecrease": "Decrease indent",
     "code": "Inline code",
     "list": "List",
     "bulletList": "Bullet list",

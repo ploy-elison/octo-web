@@ -29,6 +29,7 @@ import { Mathematics } from '@tiptap/extension-mathematics'
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight'
 import { createLowlight, common } from 'lowlight'
 import { BlockDragHandle } from './BlockDragHandle.ts'
+import { ParagraphIndent } from './ParagraphIndent.ts'
 import { Table } from '@tiptap/extension-table'
 import TableRow from '@tiptap/extension-table-row'
 import TableHeader from '@tiptap/extension-table-header'
@@ -120,6 +121,11 @@ export function buildExtensions(opts: BuildExtensionsOptions): Extensions {
     // heading + paragraph nodes (not a new node/mark) → style="text-align:…". Configured for
     // exactly those two types so lists/tables/etc. keep their own layout.
     TextAlign.configure({ types: ['heading', 'paragraph'] }),
+    // SCHEMA-SPEC §16 (SCHEMA_VERSION 18): paragraph/heading indent. A global `indent` attr on
+    // the heading + paragraph nodes (not a new node/mark), rendered via margin-left and round-
+    // tripped as data-indent. Configured for the same two types as TextAlign so lists keep their
+    // own Tab/Shift-Tab sink/lift behavior untouched.
+    ParagraphIndent.configure({ types: ['heading', 'paragraph'] }),
     // SCHEMA-SPEC §3 (SCHEMA_VERSION 6): underline mark. StarterKit's bundled Underline is
     // disabled above; this standalone install is the single `underline` mark (same pattern as
     // the sanitised Link).
@@ -230,6 +236,8 @@ export function buildPreviewExtensions(docId: string): Extensions {
     // faithfully (SCHEMA_VERSION 5–8): font size + alignment + underline + super/sub-script.
     FontSize,
     TextAlign.configure({ types: ['heading', 'paragraph'] }),
+    // Mirror the v18 indent attr so a historical version / preview renders the same margin.
+    ParagraphIndent.configure({ types: ['heading', 'paragraph'] }),
     Underline,
     Superscript,
     Subscript,
