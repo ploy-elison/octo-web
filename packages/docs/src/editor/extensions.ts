@@ -36,6 +36,7 @@ import TableRow from '@tiptap/extension-table-row'
 import TableHeader from '@tiptap/extension-table-header'
 import TableCell from '@tiptap/extension-table-cell'
 import { TableCellView } from './TableCellView.ts'
+import { TableReorderHandle } from './TableReorderHandle.ts'
 import { OctoImage } from './ImageNode.ts'
 import { CommentHighlight } from '../comments/CommentDecorations.ts'
 import { buildEmoji } from './emoji.ts'
@@ -242,6 +243,12 @@ export function buildExtensions(opts: BuildExtensionsOptions): Extensions {
         return ({ node }) => new TableCellView(node, 'td')
       },
     }),
+    // octo-docs-backend#76: table row/column drag-to-reorder. A self-built plugin renders
+    // grab handles at the row-left / column-top edges and drives prosemirror-tables'
+    // moveTableRow / moveTableColumn (single-transaction, TableMap-based, merge-aware) — see
+    // TableReorderHandle.ts. Registered AFTER the Table series so its plugin sits above the
+    // column-resize / tableEditing plugins. No schema change (pure reorder).
+    TableReorderHandle,
     // SCHEMA-SPEC §2 (SCHEMA_VERSION 2): image node. Extends @tiptap/extension-image
     // (pinned 2.27.2, single core) with the backend-aligned attr set + parse/render
     // mapping and a self-built NodeView. docId is threaded so the NodeView and the
