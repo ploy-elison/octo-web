@@ -238,7 +238,8 @@
     "freezeFirstColumn": "冻结首列",
     "freezeThroughColumn": "冻结到当前列",
     "unfreeze": "取消冻结",
-    "reorderConflict": "表格已被协同修改，换序已取消，请重试。"
+    "reorderConflict": "表格已被协同修改，换序已取消，请重试。",
+    "rowResizeConflict": "表格已被协同修改，行高调整已取消，请重试。"
   },
   "callout": {
     "info": "信息",

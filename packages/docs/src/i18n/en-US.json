@@ -238,7 +238,8 @@
     "freezeFirstColumn": "Freeze first column",
     "freezeThroughColumn": "Freeze up to this column",
     "unfreeze": "Unfreeze",
-    "reorderConflict": "The table was changed by a collaborator, so the reorder was cancelled. Please try again."
+    "reorderConflict": "The table was changed by a collaborator, so the reorder was cancelled. Please try again.",
+    "rowResizeConflict": "The table was changed by a collaborator, so the row resize was cancelled. Please try again."
   },
   "callout": {
     "info": "Info",
