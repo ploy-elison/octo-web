@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { t } from '@octo/base';
 import { MeetingApiClient } from '../service/MeetingApiClient';
 import type { Meeting } from '../service/contracts';
@@ -16,12 +16,23 @@ export default function MeetingDetail({ meetingId }: { meetingId: string }) {
   const [meeting, setMeeting] = useState<Meeting>();
   const [error, setError] = useState<string>();
   const [copied, setCopied] = useState<string>();
+  // Monotonic guard: under StrictMode + Vite dev the effect double-invokes
+  // (mount → cleanup aborts run #1 → mount again). Run #1's aborted rejection
+  // must not paint a terminal error that short-circuits run #2's success.
+  const loadSeq = useRef(0);
 
   useEffect(() => {
     const controller = new AbortController();
+    const seq = (loadSeq.current += 1);
     MeetingApiClient.getMeeting(meetingId, controller.signal)
-      .then(setMeeting)
+      .then((m) => {
+        if (seq !== loadSeq.current) return; // superseded by a newer load
+        setMeeting(m);
+        setError(undefined); // a successful load clears any stale/aborted-run error
+      })
       .catch((err) => {
+        if (seq !== loadSeq.current) return; // superseded — ignore (covers StrictMode abort)
+        if (controller.signal.aborted) return; // an aborted request is not a terminal error
         const code = classifyFailure(err).code;
         setError(code ? t(directiveForCode(code).i18nKey) : t('meeting.error.internal'));
       });
