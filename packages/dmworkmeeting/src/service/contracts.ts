@@ -119,6 +119,9 @@ export interface AdmissionFinalizeResult {
   role: MeetingRole;
 }
 
+// Domain list envelope. On the wire (approved v0.3) this is `{ items: [...],
+// next_page_token? }` and each item carries `topic`; adapter.decodeList reads
+// `items[]` and maps `topic` → `title`, so the domain keeps `meetings`/`title`.
 export interface MeetingListResult {
   meetings: Meeting[];
   nextPageToken?: string;

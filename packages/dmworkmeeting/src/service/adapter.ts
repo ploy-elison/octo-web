@@ -50,15 +50,28 @@ export const encodePasswordVerify = (r: PasswordVerifyRequest): Json => toSnakeD
 export const encodeFinalize = (r: AdmissionFinalizeRequest): Json => toSnakeDeep(r);
 
 // ── Typed response decoders. ──
-export const decodeMeeting = (w: Json): Meeting => toCamelDeep<Meeting>(w);
+// The meeting object on the wire carries `topic` (approved v0.3 contract); the
+// domain field is `title`. Map it here so `topic` never leaks past the adapter.
+export const decodeMeeting = (w: Json): Meeting => {
+  const c = toCamelDeep<Record<string, unknown>>(w);
+  if (c && typeof c === 'object' && !Array.isArray(c) && 'topic' in c) {
+    if (c.title === undefined) c.title = c.topic;
+    delete c.topic;
+  }
+  return c as unknown as Meeting;
+};
 export const decodeParticipant = (w: Json): Participant => toCamelDeep<Participant>(w);
 export const decodeEvaluate = (w: Json): AdmissionEvaluateResult => toCamelDeep<AdmissionEvaluateResult>(w);
 export const decodePasswordVerify = (w: Json): PasswordVerifyResult => toCamelDeep<PasswordVerifyResult>(w);
 export const decodeFinalize = (w: Json): AdmissionFinalizeResult => toCamelDeep<AdmissionFinalizeResult>(w);
 
+// Approved v0.3 list envelope: `{ items: [...], next_page_token? }`. The wire key
+// is `items` (not `meetings`); the domain envelope keeps `meetings`. An empty
+// `items: []` decodes to an empty list so the home renders the normal empty
+// state, never the fail-closed banner.
 export function decodeList(w: Json): MeetingListResult {
   const obj = (w && typeof w === 'object' && !Array.isArray(w) ? w : {}) as Record<string, Json>;
-  const meetings = Array.isArray(obj.meetings) ? (obj.meetings as Json[]).map(decodeMeeting) : [];
+  const meetings = Array.isArray(obj.items) ? (obj.items as Json[]).map(decodeMeeting) : [];
   const nextPageToken = typeof obj.next_page_token === 'string' ? obj.next_page_token : undefined;
   return { meetings, nextPageToken };
 }
